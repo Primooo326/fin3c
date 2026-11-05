@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Finanzas Personales ECCI — Gestión Inteligente</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet"
+  />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/css/estilos.css" />
+</head>
+<body>
+  <!-- Contenedor global de notificaciones Toast -->
+  <div id="toastContenedor" class="toast-contenedor" aria-live="polite"></div>
+
+  <!-- =====================================================================
+       PANTALLA 1: AUTENTICACIÓN Y REGISTRO (RF-01 & RNF-01 PBKDF2-SHA256)
+       ===================================================================== -->
+  <section id="vistaAuth" class="auth-wrapper">
+    <div class="auth-hero">
+      <div>
+        <div class="marca-insignia">
+          <span>🌿</span>
+          <span>Universidad ECCI • Ingeniería • PyA 2ANL 2026-2</span>
+        </div>
+        <h1>Control inteligente y claro de tus finanzas personales</h1>
+        <p>
+          Consolida tus cuentas bancarias, clasifica ingresos y gastos con categorías dinámicas,
+          recibe alertas preventivas al 85% de ejecución presupuestal y proyecta tus metas de ahorro.
+        </p>
+        <div class="hero-pills">
+          <span class="hero-pill">🔐 Cifrado PBKDF2 / SHA-256</span>
+          <span class="hero-pill">🐘 Persistencia ACID PostgreSQL</span>
+          <span class="hero-pill">⚡ Servicio Web FastAPI REST</span>
+          <span class="hero-pill">📊 Exportación PDF y Excel</span>
+        </div>
+      </div>
+
+      <div class="auth-creditos">
+        <strong>Equipo 3 — Subequipo B:</strong> Juan Morales (138311) • Angel Castellanos (149701) • Esteban Lopez (127063)
+      </div>
+    </div>
+
+    <div class="auth-panel">
+      <div class="auth-card">
+        <div id="bannerEstadoBDAuth" class="oculto alerta-item preventiva" style="margin-bottom: 1rem;"></div>
+
+        <div class="auth-tabs" role="tablist">
+          <button type="button" id="tabLoginBtn" class="auth-tab activo" onclick="cambiarTabAuth('login')">
+            Iniciar Sesión
+          </button>
+          <button type="button" id="tabRegistroBtn" class="auth-tab" onclick="cambiarTabAuth('registro')">
+            Crear Cuenta
+          </button>
+        </div>
+
+        <!-- Formulario Login -->
+        <form id="formLogin" onsubmit="manejarLogin(event)">
+          <div class="campo">
+            <label for="loginIdentificador">Correo electrónico o Documento</label>
+            <input
+              id="loginIdentificador"
+              type="text"
+              class="input-control"
+              placeholder="juan.morales@ecci.edu.co o 138311"
+              required
+            />
+          </div>
+          <div class="campo">
+            <label for="loginPassword">Contraseña de acceso</label>
+            <input
+              id="loginPassword"
+              type="password"
+              class="input-control"
+              placeholder="••••••••"
+              required
+            />
+          </div>
+          <button type="submit" class="btn btn-primario btn-bloque" style="margin-top: 0.4rem;">
+            Ingresar al Sistema
+          </button>
+        </form>
+
+        <!-- Formulario Registro -->
+        <form id="formRegistro" class="oculto" onsubmit="manejarRegistro(event)">
+          <div class="campo">
+            <label for="regDocumento">Documento de identidad (solo números)</label>
+            <input id="regDocumento" type="text" class="input-control" placeholder="Ej: 1024589631" required />
+          </div>
+          <div class="campo">
+            <label for="regNombre">Nombre completo</label>
+            <input id="regNombre" type="text" class="input-control" placeholder="Ej: Laura Gómez" required />
+          </div>
+          <div class="campo">
+            <label for="regCorreo">Correo electrónico</label>
+            <input id="regCorreo" type="email" class="input-control" placeholder="laura@correo.com" required />
+          </div>
+          <div class="campo">
+            <label for="regPassword">Contraseña (mínimo 6 caracteres)</label>
+            <input id="regPassword" type="password" class="input-control" placeholder="Mínimo 6 caracteres" required />
+          </div>
+          <button type="submit" class="btn btn-primario btn-bloque">
+            Registrarme con Cuenta Inicial
+          </button>
+        </form>
+
+        <!-- Acceso rápido de sustentación -->
+        <div class="demo-box">
+          <div class="demo-box-titulo">⚡ Acceso rápido sustentación (Subequipo 3B)</div>
+          <div class="demo-grid">
+            <button type="button" class="btn-demo" onclick="loginRapidoDemo('138311')">
+              Juan Morales
+              <small>Doc: 138311 (Completo)</small>
+            </button>
+            <button type="button" class="btn-demo" onclick="loginRapidoDemo('149701')">
+              Angel Castellanos
+              <small>Doc: 149701</small>
+            </button>
+            <button type="button" class="btn-demo" onclick="loginRapidoDemo('127063')">
+              Esteban Lopez
+              <small>Doc: 127063</small>
+            </button>
+            <a href="/docs" target="_blank" class="btn-demo" style="text-decoration: none;">
+              Swagger /docs ↗
+              <small>Documentación API REST</small>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =====================================================================
+       PANTALLA 2: APLICACIÓN PRINCIPAL RESPONSIVA
+       ===================================================================== -->
+  <div id="vistaApp" class="app-layout oculto">
+    <!-- Sidebar Escritorio -->
+    <aside class="sidebar">
+      <div>
+        <div class="logo-box">
+          <div class="logo-icono">F$</div>
+          <div class="logo-texto">
+            <strong>Finanzas ECCI</strong>
+            <span>Gestión Personal 360°</span>
+          </div>
+        </div>
+
+        <ul class="nav-menu">
+          <li>
+            <button class="nav-btn activo" data-seccion="dashboard" onclick="navegarSeccion('dashboard')">
+              <span>📊</span> <span>Resumen General</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-btn" data-seccion="movimientos" onclick="navegarSeccion('movimientos')">
+              <span>💸</span> <span>Movimientos y Categorías</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-btn" data-seccion="cuentas" onclick="navegarSeccion('cuentas')">
+              <span>🏦</span> <span>Cuentas Bancarias</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-btn" data-seccion="presupuestos" onclick="navegarSeccion('presupuestos')">
+              <span>🎯</span> <span>Presupuestos y Alertas</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-btn" data-seccion="metas" onclick="navegarSeccion('metas')">
+              <span>🌱</span> <span>Metas de Ahorro</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-btn" data-seccion="reportes" onclick="navegarSeccion('reportes')">
+              <span>📑</span> <span>Reportes PDF / Excel</span>
+            </button>
+          </li>
+        </ul>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="badge-bd">
+          <span id="puntoBD" class="punto-vivo"></span>
+          <span id="textoBD">PostgreSQL ACID Activo</span>
+        </div>
+        <a href="/docs" target="_blank" class="enlace-swagger">⚡ Explorar API REST (/docs)</a>
+        <button type="button" class="btn btn-menta btn-bloque" onclick="cerrarSesionApp()">
+          Cerrar Sesión
+        </button>
+      </div>
+    </aside>
+
+    <!-- Área Principal -->
+    <main class="main-content">
+      <!-- Barra Superior -->
+      <header class="topbar">
+        <div class="topbar-titulo">
+          <h2 id="tituloSeccion">Resumen Financiero</h2>
+          <p id="subtituloSeccion">Consolidado de cuentas, ejecución presupuestal y flujo de caja</p>
+        </div>
+
+        <div class="topbar-acciones">
+          <select id="selectorMesGlobal" class="input-control" style="width: auto; min-width: 165px;" onchange="cambiarMesGlobal()">
+            <option value="Todos">Todos los meses</option>
+          </select>
+
+          <div class="chip-usuario" onclick="abrirModalPerfil()" title="Editar perfil y contraseña">
+            <div id="avatarIniciales" class="avatar-iniciales">JM</div>
+            <div class="chip-usuario-info">
+              <strong id="nombreUsuarioTop">Usuario</strong>
+              <small id="correoUsuarioTop">correo@ecci.edu.co</small>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- SECCIÓN 1: DASHBOARD -->
+      <section id="sec-dashboard" class="seccion-vista">
+        <div id="contenedorAlertasDashboard" class="alertas-stack"></div>
+
+        <div class="kpi-grid">
+          <article class="kpi-card destacada">
+            <div class="kpi-etiqueta">Patrimonio en Cuentas</div>
+            <div id="kpiPatrimonio" class="kpi-valor">$0</div>
+            <div id="kpiCuentasSub" class="kpi-sub">Saldo consolidado disponible</div>
+          </article>
+          <article class="kpi-card">
+            <div class="kpi-etiqueta">Ingresos del Período</div>
+            <div id="kpiIngresos" class="kpi-valor" style="color: var(--emerald-600);">$0</div>
+            <div class="kpi-sub">Entradas registradas</div>
+          </article>
+          <article class="kpi-card">
+            <div class="kpi-etiqueta">Gastos del Período</div>
+            <div id="kpiGastos" class="kpi-valor" style="color: #dc2626;">$0</div>
+            <div class="kpi-sub">Salidas ejecutadas</div>
+          </article>
+          <article class="kpi-card">
+            <div class="kpi-etiqueta">Balance Neto & Ahorro</div>
+            <div id="kpiBalance" class="kpi-valor">$0</div>
+            <div id="kpiTasaAhorro" class="kpi-sub">Tasa de ahorro: 0%</div>
+          </article>
+        </div>
+
+        <div class="panel-grid-2">
+          <div class="card">
+            <div class="card-header">
+              <h3>Evolución Mensual: Ingresos vs. Gastos</h3>
+              <span class="badge-tipo">Comparativo Histórico</span>
+            </div>
+            <div class="chart-box">
+              <canvas id="graficaMensualDashboard"></canvas>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3>Gastos por Categoría</h3>
+              <span class="badge-tipo">Distribución</span>
+            </div>
+            <div class="chart-box">
+              <canvas id="graficaCategoriasDashboard"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-grid-equal">
+          <div class="card">
+            <div class="card-header">
+              <h3>Mis Cuentas y Fuentes</h3>
+              <button class="btn btn-menta" onclick="navegarSeccion('cuentas')">Administrar</button>
+            </div>
+            <div id="resumenCuentasDashboard" style="display: flex; flex-direction: column; gap: 0.65rem;"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3>Últimas Transacciones</h3>
+              <button class="btn btn-primario" onclick="navegarSeccion('movimientos')">+ Registrar</button>
+            </div>
+            <div id="ultimosMovimientosDashboard" class="tabla-contenedor"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECCIÓN 2: MOVIMIENTOS Y CATEGORÍAS DINÁMICAS (RF-03) -->
+      <section id="sec-movimientos" class="seccion-vista oculto">
+        <div class="panel-grid-2">
+          <div class="card">
+            <div class="card-header">
+              <h3>Registrar Nueva Transacción</h3>
+              <span class="badge-tipo">Actualiza saldo en cuenta</span>
+            </div>
+            <form id="formNuevoMovimiento" onsubmit="guardarMovimiento(event)">
+              <div class="form-grid">
+                <div class="campo">
+                  <label for="movTipo">Tipo de Operación</label>
+                  <select id="movTipo" class="input-control" onchange="actualizarSelectCategoriasMovimiento()" required>
+                    <option value="Gasto">Gasto (Débito)</option>
+                    <option value="Ingreso">Ingreso (Crédito)</option>
+                  </select>
+                </div>
+                <div class="campo">
+                  <label for="movCuenta">Cuenta Bancaria / Origen</label>
+                  <select id="movCuenta" class="input-control" required></select>
+                </div>
+                <div class="campo">
+                  <label for="movCategoria">Categoría</label>
+                  <select id="movCategoria" class="input-control" required></select>
+                </div>
+                <div class="campo">
+                  <label for="movMonto">Monto (COP)</label>
+                  <input id="movMonto" type="text" class="input-control" placeholder="Ej: 185000" required />
+                </div>
+                <div class="campo">
+                  <label for="movFecha">Fecha (AAAA-MM-DD)</label>
+                  <input id="movFecha" type="date" class="input-control" required />
+                </div>
+                <div class="campo">
+                  <label for="movDescripcion">Descripción detallada</label>
+                  <input id="movDescripcion" type="text" class="input-control" placeholder="Ej: Pago factura internet fibra" required />
+                </div>
+              </div>
+              <button type="submit" class="btn btn-primario" style="margin-top: 0.4rem;">
+                Procesar Transacción
+              </button>
+            </form>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3>Categorías Personalizadas Dinámicas</h3>
+              <span class="badge-tipo">RF-03</span>
+            </div>
+            <form id="formNuevaCategoria" onsubmit="guardarCategoriaPersonalizada(event)">
+              <div class="campo">
+                <label for="catNombre">Nombre de nueva categoría</label>
+                <input id="catNombre" type="text" class="input-control" placeholder="Ej: Mascotas, Inversiones ETF..." required />
+              </div>
+              <div class="form-grid">
+                <div class="campo">
+                  <label for="catTipo">Tipo de movimiento</label>
+                  <select id="catTipo" class="input-control">
+                    <option value="Gasto">Gasto</option>
+                    <option value="Ingreso">Ingreso</option>
+                  </select>
+                </div>
+                <div class="campo">
+                  <label for="catLimiteSug">Techo mensual opcional</label>
+                  <input id="catLimiteSug" type="text" class="input-control" placeholder="0 (opcional)" />
+                </div>
+              </div>
+              <button type="submit" class="btn btn-menta btn-bloque">+ Crear Categoría Propia</button>
+            </form>
+
+            <div id="listaCategoriasPersonalizadas" style="margin-top: 1rem; display: flex; flex-wrap: wrap; gap: 0.45rem;"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3>Historial de Transacciones</h3>
+            <div style="display: flex; gap: 0.55rem; flex-wrap: wrap;">
+              <select id="filtroMovTipo" class="input-control" style="width: auto;" onchange="cargarVistaMovimientos()">
+                <option value="Todos">Todos los tipos</option>
+                <option value="Ingreso">Solo Ingresos</option>
+                <option value="Gasto">Solo Gastos</option>
+              </select>
+              <select id="filtroMovCuenta" class="input-control" style="width: auto;" onchange="cargarVistaMovimientos()">
+                <option value="Todos">Todas las cuentas</option>
+              </select>
+            </div>
+          </div>
+          <div id="tablaMovimientosCompleta" class="tabla-contenedor"></div>
+        </div>
+      </section>
+
+      <!-- SECCIÓN 3: CUENTAS BANCARIAS (RF-02) -->
+      <section id="sec-cuentas" class="seccion-vista oculto">
+        <div class="card">
+          <div class="card-header">
+            <h3>Registrar Nueva Fuente de Dinero o Cuenta Bancaria</h3>
+            <span class="badge-tipo">RF-02 • Ahorros / Corriente / Efectivo</span>
+          </div>
+          <form id="formNuevaCuenta" onsubmit="guardarCuentaBancaria(event)">
+            <div class="form-grid">
+              <div class="campo">
+                <label for="ctaNumero">Número o Código de Cuenta</label>
+                <input id="ctaNumero" type="text" class="input-control" placeholder="Ej: 4589-8821-0012" required />
+              </div>
+              <div class="campo">
+                <label for="ctaEntidad">Entidad Financiera / Origen</label>
+                <input id="ctaEntidad" type="text" class="input-control" placeholder="Ej: Bancolombia, Nu, Nequi, Caja..." required />
+              </div>
+              <div class="campo">
+                <label for="ctaTipo">Tipo de Cuenta</label>
+                <select id="ctaTipo" class="input-control" required>
+                  <option value="Ahorros">Ahorros</option>
+                  <option value="Corriente">Corriente</option>
+                  <option value="Efectivo">Efectivo</option>
+                </select>
+              </div>
+              <div class="campo">
+                <label for="ctaSaldo">Saldo Disponible Inicial (COP)</label>
+                <input id="ctaSaldo" type="text" class="input-control" placeholder="Ej: 1200000" value="0" required />
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primario">+ Agregar Cuenta Bancaria</button>
+          </form>
+        </div>
+
+        <div id="gridTarjetasCuentas" class="cuentas-grid"></div>
+      </section>
+
+      <!-- SECCIÓN 4: PRESUPUESTOS Y ALERTAS AL 85% (RF-04) -->
+      <section id="sec-presupuestos" class="seccion-vista oculto">
+        <div class="card">
+          <div class="card-header">
+            <h3>Definir o Ajustar Techo Presupuestal Mensual</h3>
+            <span class="badge-tipo">RF-04 • Alerta preventiva al 85%</span>
+          </div>
+          <form id="formPresupuesto" onsubmit="guardarPresupuesto(event)">
+            <div class="form-grid">
+              <div class="campo">
+                <label for="presCategoria">Categoría de Gasto</label>
+                <select id="presCategoria" class="input-control" required></select>
+              </div>
+              <div class="campo">
+                <label for="presLimite">Monto Tope Mensual (COP)</label>
+                <input id="presLimite" type="text" class="input-control" placeholder="Ej: 600000" required />
+              </div>
+              <div class="campo">
+                <label for="presUmbral">% Umbral de Alerta Preventiva</label>
+                <input id="presUmbral" type="number" min="10" max="100" step="1" class="input-control" value="85" required />
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primario">Guardar Tope Presupuestal</button>
+          </form>
+        </div>
+
+        <div id="contenedorAlertasPresupuestos" class="alertas-stack"></div>
+        <div id="gridPresupuestos" class="cuentas-grid"></div>
+      </section>
+
+      <!-- SECCIÓN 5: METAS DE AHORRO (RF-05) -->
+      <section id="sec-metas" class="seccion-vista oculto">
+        <div class="card">
+          <div class="card-header">
+            <h3>Crear Nuevo Objetivo de Ahorro Programado</h3>
+            <span class="badge-tipo">RF-05 • Con Proyección Automática de Fecha</span>
+          </div>
+          <form id="formNuevaMeta" onsubmit="guardarMetaAhorro(event)">
+            <div class="form-grid">
+              <div class="campo">
+                <label for="metaNombre">Propósito de la Meta</label>
+                <input id="metaNombre" type="text" class="input-control" placeholder="Ej: Fondo de Emergencia, Moto, Posgrado..." required />
+              </div>
+              <div class="campo">
+                <label for="metaObjetivo">Monto Objetivo Total (COP)</label>
+                <input id="metaObjetivo" type="text" class="input-control" placeholder="Ej: 5000000" required />
+              </div>
+              <div class="campo">
+                <label for="metaAbonoIni">Capital Inicial Acumulado</label>
+                <input id="metaAbonoIni" type="text" class="input-control" value="0" />
+              </div>
+              <div class="campo">
+                <label for="metaFechaLim">Fecha Límite Proyectada</label>
+                <input id="metaFechaLim" type="date" class="input-control" required />
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primario">+ Crear Meta de Ahorro</button>
+          </form>
+        </div>
+
+        <div id="gridMetasAhorro" class="cuentas-grid"></div>
+      </section>
+
+      <!-- SECCIÓN 6: REPORTES CONSOLIDADOS PDF Y EXCEL (RF-06) -->
+      <section id="sec-reportes" class="seccion-vista oculto">
+        <div class="card">
+          <div class="card-header">
+            <h3>Generador de Reportes Consolidados por Rango de Fechas</h3>
+            <div style="display: flex; gap: 0.55rem; flex-wrap: wrap;">
+              <button type="button" class="btn btn-primario" onclick="descargarArchivoReporte('pdf')">
+                📄 Exportar PDF Consolidado
+              </button>
+              <button type="button" class="btn btn-menta" onclick="descargarArchivoReporte('excel')">
+                📊 Exportar Excel (.xlsx)
+              </button>
+            </div>
+          </div>
+
+          <form onsubmit="consultarReporteConsolidado(event)" class="form-grid" style="align-items: end;">
+            <div class="campo">
+              <label for="repFechaInicio">Fecha de Inicio</label>
+              <input id="repFechaInicio" type="date" class="input-control" />
+            </div>
+            <div class="campo">
+              <label for="repFechaFin">Fecha de Fin</label>
+              <input id="repFechaFin" type="date" class="input-control" />
+            </div>
+            <div class="campo">
+              <button type="submit" class="btn btn-menta btn-bloque">Actualizar Consolidado</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="kpi-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
+          <article class="kpi-card">
+            <div class="kpi-etiqueta">Total Ingresos en Rango</div>
+            <div id="repKpiIngresos" class="kpi-valor" style="color: var(--emerald-600);">$0</div>
+          </article>
+          <article class="kpi-card">
+            <div class="kpi-etiqueta">Total Gastos en Rango</div>
+            <div id="repKpiGastos" class="kpi-valor" style="color: #dc2626;">$0</div>
+          </article>
+          <article class="kpi-card destacada">
+            <div class="kpi-etiqueta">Balance Neto Final</div>
+            <div id="repKpiBalance" class="kpi-valor">$0</div>
+          </article>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3>Gráfico Consolidado del Período Consultado</h3>
+          </div>
+          <div class="chart-box">
+            <canvas id="graficaReporteRango"></canvas>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Barra de Navegación Inferior Tipo App para Celulares / Tablets -->
+    <nav class="bottom-nav" aria-label="Navegación móvil">
+      <button class="bottom-nav-btn activo" data-seccion="dashboard" onclick="navegarSeccion('dashboard')">
+        <span>📊</span><span>Inicio</span>
+      </button>
+      <button class="bottom-nav-btn" data-seccion="movimientos" onclick="navegarSeccion('movimientos')">
+        <span>💸</span><span>Flujos</span>
+      </button>
+      <button class="bottom-nav-btn" data-seccion="cuentas" onclick="navegarSeccion('cuentas')">
+        <span>🏦</span><span>Cuentas</span>
+      </button>
+      <button class="bottom-nav-btn" data-seccion="presupuestos" onclick="navegarSeccion('presupuestos')">
+        <span>🎯</span><span>Topes</span>
+      </button>
+      <button class="bottom-nav-btn" data-seccion="metas" onclick="navegarSeccion('metas')">
+        <span>🌱</span><span>Metas</span>
+      </button>
+      <button class="bottom-nav-btn" data-seccion="reportes" onclick="navegarSeccion('reportes')">
+        <span>📑</span><span>Reportes</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- MODAL 1: ABONAR CAPITAL A META DE AHORRO -->
+  <div id="modalAbonoMeta" class="modal-backdrop oculto">
+    <div class="modal-card">
+      <div class="card-header">
+        <h3 id="tituloModalAbono">Abonar Capital a Meta</h3>
+        <button type="button" class="btn btn-menta" onclick="cerrarModalAbono()">✕</button>
+      </div>
+      <form onsubmit="confirmarAbonoMeta(event)">
+        <input type="hidden" id="abonoIdMeta" />
+        <div class="campo">
+          <label for="abonoMonto">Monto a abonar (COP)</label>
+          <input id="abonoMonto" type="text" class="input-control" placeholder="Ej: 250000" required />
+        </div>
+        <div class="campo">
+          <label for="abonoCuentaOrigen">Descontar de Cuenta Bancaria (opcional)</label>
+          <select id="abonoCuentaOrigen" class="input-control"></select>
+        </div>
+        <button type="submit" class="btn btn-primario btn-bloque">Confirmar Abono Progresivo</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL 2: PERFIL DE USUARIO Y CAMBIO DE CONTRASEÑA -->
+  <div id="modalPerfil" class="modal-backdrop oculto">
+    <div class="modal-card">
+      <div class="card-header">
+        <h3>Perfil del Titular</h3>
+        <button type="button" class="btn btn-menta" onclick="cerrarModalPerfil()">✕</button>
+      </div>
+      <form onsubmit="guardarCambiosPerfil(event)">
+        <div class="campo">
+          <label>Documento de Identidad</label>
+          <input id="perfilDocumento" type="text" class="input-control" disabled />
+        </div>
+        <div class="campo">
+          <label for="perfilNombre">Nombre Completo</label>
+          <input id="perfilNombre" type="text" class="input-control" required />
+        </div>
+        <div class="campo">
+          <label for="perfilCorreo">Correo Electrónico</label>
+          <input id="perfilCorreo" type="email" class="input-control" required />
+        </div>
+        <div class="campo">
+          <label for="perfilPassword">Nueva Contraseña (dejar vacío para conservar actual)</label>
+          <input id="perfilPassword" type="password" class="input-control" placeholder="Nueva clave opcional" />
+        </div>
+        <div style="display: flex; gap: 0.6rem;">
+          <button type="submit" class="btn btn-primario" style="flex: 1;">Actualizar Datos</button>
+          <button type="button" class="btn btn-peligro" onclick="cerrarSesionApp()">Salir</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
