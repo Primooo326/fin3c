@@ -1,13 +1,13 @@
 # =============================================================================
-#  Módulo DatosFinanzas: Capa de Persistencia Relacional en PostgreSQL (ACID)
+#  Módulo DatosFinanzas: Capa de Persistencia Relacional
+#  Soporta PostgreSQL (ACID) como motor principal y SQLite como respaldo
+#  automático si PostgreSQL no está escuchando en el puerto configurado.
 #  Capa: PERSISTENCIA
-#
-#  Mantiene 100% compatibilidad con las tuplas esperadas por GestorFinanzas
-#  original y añade persistencia completa para RF-01 a RF-06.
 # =============================================================================
 
 import os
 from pathlib import Path
+import sqlite3
 
 try:
     from dotenv import load_dotenv
@@ -18,7 +18,7 @@ except ImportError:
 
 from LOGICA.Seguridad import Seguridad
 
-# Soporte transparente para psycopg v3 (recomendado en Python 3.12+) o psycopg2
+# Conector PostgreSQL (psycopg v3 o psycopg2)
 _DRIVER_PG = None
 try:
     import psycopg  # type: ignore
@@ -30,11 +30,69 @@ except ImportError:
     except ImportError:
         _DRIVER_PG = None
 
+RUTA_SQLITE = Path(__file__).resolve().parent / "finanzas_local.db"
 _esquemaInicializado = False
+_motorActivo = None  # 'postgres' o 'sqlite'
 
 
-class ErrorPersistenciaConexion(RuntimeError):
-    """Excepción controlada cuando PostgreSQL no se encuentra disponible."""
+class AdaptadorCursor:
+    """Envuelve cursores para unificar sintaxis %s (Postgres) y ? (SQLite)."""
+    def __init__(self, cursor_real, es_sqlite: bool):
+        self._cur = cursor_real
+        self._es_sqlite = es_sqlite
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if hasattr(self._cur, "close"):
+            self._cur.close()
+
+    def execute(self, sql, params=None):
+        if self._es_sqlite:
+            # En SQLite reemplazamos %s por ? para compatibilidad uniforme
+            sql_convertido = sql.replace("%s", "?")
+            if params is None:
+                return self._cur.execute(sql_convertido)
+            return self._cur.execute(sql_convertido, params)
+        if params is None:
+            return self._cur.execute(sql)
+        return self._cur.execute(sql, params)
+
+    def fetchone(self):
+        return self._cur.fetchone()
+
+    def fetchall(self):
+        return self._cur.fetchall()
+
+    def __getattr__(self, name):
+        return getattr(self._cur, name)
+
+
+class ConexionUnificada:
+    """Administrador de contexto que proporciona una conexión y cursor uniforme."""
+    def __init__(self, conn, es_sqlite: bool):
+        self._conn = conn
+        self._es_sqlite = es_sqlite
+
+    def cursor(self):
+        return AdaptadorCursor(self._conn.cursor(), self._es_sqlite)
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type:
+            self.rollback()
+        else:
+            self.commit()
+        self._conn.close()
 
 
 def obtenerParametrosConexion():
@@ -47,11 +105,9 @@ def obtenerParametrosConexion():
     }
 
 
-def _abrirConexion():
+def _probarConexionPostgres():
     if _DRIVER_PG is None:
-        raise ErrorPersistenciaConexion(
-            "No está instalado el conector de PostgreSQL. Ejecute: pip install psycopg[binary]"
-        )
+        return None
     params = obtenerParametrosConexion()
     try:
         if _DRIVER_PG == "psycopg3":
@@ -61,7 +117,7 @@ def _abrirConexion():
                 dbname=params["dbname"],
                 user=params["user"],
                 password=params["password"],
-                connect_timeout=4,
+                connect_timeout=2,
             )
         return psycopg2.connect(
             host=params["host"],
@@ -69,41 +125,54 @@ def _abrirConexion():
             dbname=params["dbname"],
             user=params["user"],
             password=params["password"],
-            connect_timeout=4,
+            connect_timeout=2,
         )
-    except Exception as exc:
-        raise ErrorPersistenciaConexion(
-            f"No fue posible conectar a PostgreSQL en {params['host']}:{params['port']} "
-            f"(BD: {params['dbname']}). Verifique su archivo .env o levante el contenedor "
-            f"con 'docker compose up -d'. Detalle: {exc}"
-        ) from exc
+    except Exception:
+        return None
+
+
+def _abrirConexion():
+    global _motorActivo
+    conn_pg = _probarConexionPostgres()
+    if conn_pg is not None:
+        _motorActivo = "postgres"
+        return ConexionUnificada(conn_pg, es_sqlite=False)
+
+    _motorActivo = "sqlite"
+    conn_lite = sqlite3.connect(str(RUTA_SQLITE))
+    conn_lite.execute("PRAGMA foreign_keys = ON;")
+    return ConexionUnificada(conn_lite, es_sqlite=True)
 
 
 def verificarConexion():
-    """Comprueba estado en vivo del motor PostgreSQL."""
+    """Comprueba el estado del motor de persistencia activo."""
     try:
         inicializarBaseDatos()
         with _abrirConexion() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT version();")
-                fila = cur.fetchone()
-                return True, fila[0] if fila else "PostgreSQL conectado"
+                if _motorActivo == "postgres":
+                    cur.execute("SELECT version();")
+                    fila = cur.fetchone()
+                    return True, f"PostgreSQL conectado: {fila[0]}"
+                return True, "Base de datos local SQLite activa (respaldo automático listo)"
     except Exception as exc:
         return False, str(exc)
 
 
 def inicializarBaseDatos():
-    """Crea tablas, índices y secuencias automáticamente e inserta datos semilla si está vacía."""
-    global _esquemaInicializado
+    """Crea tablas, índices y datos semilla en el motor activo."""
+    global _esquemaInicializado, _motorActivo
     if _esquemaInicializado:
         return
 
-    rutaSql = Path(__file__).resolve().parent / "schema.sql"
-    strScriptSql = rutaSql.read_text(encoding="utf-8")
-
     with _abrirConexion() as conn:
         with conn.cursor() as cur:
-            cur.execute(strScriptSql)
+            if _motorActivo == "postgres":
+                rutaSql = Path(__file__).resolve().parent / "schema.sql"
+                cur.execute(rutaSql.read_text(encoding="utf-8"))
+            else:
+                _crearEsquemaSQLite(cur)
+
             cur.execute("SELECT COUNT(*) FROM personas;")
             intCantidad = cur.fetchone()[0]
             if intCantidad == 0:
@@ -111,6 +180,72 @@ def inicializarBaseDatos():
         conn.commit()
 
     _esquemaInicializado = True
+
+
+def _crearEsquemaSQLite(cur):
+    """Crea esquema compatible con SQLite."""
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS personas (
+        str_documento      VARCHAR(30) PRIMARY KEY,
+        str_nombre         VARCHAR(150) NOT NULL,
+        str_correo         VARCHAR(150) NOT NULL UNIQUE,
+        str_password_hash  VARCHAR(300) NOT NULL DEFAULT '',
+        dt_fecha_registro  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS cuentas_bancarias (
+        str_numero_cuenta    VARCHAR(50) NOT NULL,
+        str_documento        VARCHAR(30) NOT NULL REFERENCES personas(str_documento) ON DELETE CASCADE,
+        str_entidad_bancaria VARCHAR(100) NOT NULL,
+        str_tipo_cuenta      VARCHAR(30) NOT NULL CHECK (str_tipo_cuenta IN ('Ahorros', 'Corriente', 'Efectivo')),
+        dbl_saldo_actual     NUMERIC(16, 2) NOT NULL DEFAULT 0,
+        PRIMARY KEY (str_documento, str_numero_cuenta)
+    );
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS categorias_personalizadas (
+        int_id_categoria      INTEGER PRIMARY KEY,
+        str_documento         VARCHAR(30) NOT NULL REFERENCES personas(str_documento) ON DELETE CASCADE,
+        str_nombre_categoria  VARCHAR(80) NOT NULL,
+        str_tipo_movimiento   VARCHAR(20) NOT NULL CHECK (str_tipo_movimiento IN ('Ingreso', 'Gasto')),
+        dbl_limite_sugerido   NUMERIC(16, 2) NOT NULL DEFAULT 0,
+        UNIQUE (str_documento, str_nombre_categoria, str_tipo_movimiento)
+    );
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS movimientos (
+        int_id            INTEGER PRIMARY KEY,
+        str_documento     VARCHAR(30) NOT NULL REFERENCES personas(str_documento) ON DELETE CASCADE,
+        str_tipo          VARCHAR(20) NOT NULL CHECK (str_tipo IN ('Ingreso', 'Gasto')),
+        str_descripcion   VARCHAR(255) NOT NULL,
+        dbl_monto         NUMERIC(16, 2) NOT NULL CHECK (dbl_monto > 0),
+        str_categoria     VARCHAR(80) NOT NULL,
+        str_fecha         VARCHAR(10) NOT NULL,
+        str_numero_cuenta VARCHAR(50) NOT NULL DEFAULT ''
+    );
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS presupuestos (
+        str_documento          VARCHAR(30) NOT NULL REFERENCES personas(str_documento) ON DELETE CASCADE,
+        str_categoria          VARCHAR(80) NOT NULL,
+        dbl_limite             NUMERIC(16, 2) NOT NULL CHECK (dbl_limite > 0),
+        str_periodo_mes_ano    VARCHAR(20) NOT NULL DEFAULT 'Todos',
+        dbl_porcentaje_alerta  NUMERIC(5, 2) NOT NULL DEFAULT 85.00,
+        PRIMARY KEY (str_documento, str_categoria)
+    );
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS metas_ahorro (
+        int_id_meta          INTEGER PRIMARY KEY,
+        str_documento        VARCHAR(30) NOT NULL REFERENCES personas(str_documento) ON DELETE CASCADE,
+        str_nombre_meta      VARCHAR(120) NOT NULL,
+        dbl_monto_objetivo   NUMERIC(16, 2) NOT NULL CHECK (dbl_monto_objetivo > 0),
+        dbl_monto_acumulado  NUMERIC(16, 2) NOT NULL DEFAULT 0,
+        str_fecha_limite     VARCHAR(10) NOT NULL,
+        str_fecha_creacion   VARCHAR(10) NOT NULL
+    );
+    """)
 
 
 def _insertarDatosSemilla(cur):
@@ -155,37 +290,34 @@ def _insertarDatosSemilla(cur):
 
     # 3. Categorías personalizadas dinámicas
     listaCategoriasDemo = [
-        ("138311", "Freelance Desarrollo", "Ingreso", 0.00),
-        ("138311", "Suscripciones Cloud", "Gasto", 150000.00),
+        (1, "138311", "Freelance Desarrollo", "Ingreso", 0.00),
+        (2, "138311", "Suscripciones Cloud", "Gasto", 150000.00),
     ]
     for tplCat in listaCategoriasDemo:
         cur.execute(
             """
             INSERT INTO categorias_personalizadas
-            (str_documento, str_nombre_categoria, str_tipo_movimiento, dbl_limite_sugerido)
-            VALUES (%s, %s, %s, %s)
+            (int_id_categoria, str_documento, str_nombre_categoria, str_tipo_movimiento, dbl_limite_sugerido)
+            VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT DO NOTHING;
             """,
             tplCat,
         )
 
-    # 4. Movimientos históricos (2026-09, 2026-10 y mes actual 2026-11)
+    # 4. Movimientos históricos
     listaMovimientosDemo = [
-        # Septiembre 2026
         ("138311", "Ingreso", "Nómina mensual septiembre", 3800000.00, "Salario", "2026-09-01", "4589-1029-3301"),
         ("138311", "Ingreso", "Soporte módulo backend", 650000.00, "Honorarios", "2026-09-14", "8810-4420-9912"),
         ("138311", "Gasto", "Canon de arrendamiento septiembre", 1200000.00, "Vivienda", "2026-09-03", "4589-1029-3301"),
         ("138311", "Gasto", "Mercado mensual familiar", 490000.00, "Alimentación", "2026-09-08", "4589-1029-3301"),
         ("138311", "Gasto", "Energía, agua y fibra óptica", 235000.00, "Servicios", "2026-09-12", "8810-4420-9912"),
         ("138311", "Gasto", "Transporte universidad y oficina", 180000.00, "Transporte", "2026-09-19", "EFEC-138311"),
-        # Octubre 2026
         ("138311", "Ingreso", "Nómina mensual octubre", 3800000.00, "Salario", "2026-10-01", "4589-1029-3301"),
         ("138311", "Ingreso", "Rendimientos CDT trimestral", 320000.00, "Inversiones", "2026-10-15", "4589-1029-3301"),
         ("138311", "Gasto", "Canon de arrendamiento octubre", 1200000.00, "Vivienda", "2026-10-02", "4589-1029-3301"),
         ("138311", "Gasto", "Supermercado y proteínas", 540000.00, "Alimentación", "2026-10-10", "4589-1029-3301"),
         ("138311", "Gasto", "Servicios públicos e internet", 240000.00, "Servicios", "2026-10-14", "8810-4420-9912"),
         ("138311", "Gasto", "Libros técnicos y curso AWS", 290000.00, "Educación", "2026-10-21", "8810-4420-9912"),
-        # Noviembre 2026 (Mes actual)
         ("138311", "Ingreso", "Nómina mensual desarrollo de software", 3800000.00, "Salario", "2026-11-01", "4589-1029-3301"),
         ("138311", "Ingreso", "Consultoría API REST cliente externo", 950000.00, "Freelance Desarrollo", "2026-11-03", "8810-4420-9912"),
         ("138311", "Gasto", "Canon de arrendamiento noviembre", 1200000.00, "Vivienda", "2026-11-02", "4589-1029-3301"),
@@ -194,27 +326,26 @@ def _insertarDatosSemilla(cur):
         ("138311", "Gasto", "Recarga movilidad urbana", 165000.00, "Transporte", "2026-11-04", "EFEC-138311"),
         ("138311", "Gasto", "Salidas fin de semana y cine (excede tope)", 280000.00, "Entretenimiento", "2026-11-05", "EFEC-138311"),
         ("138311", "Gasto", "Servidor AWS EC2 t3.small y dominio", 92000.00, "Suscripciones Cloud", "2026-11-05", "8810-4420-9912"),
-        # Datos base Angel Castellanos
         ("149701", "Ingreso", "Salario mensual noviembre", 3200000.00, "Salario", "2026-11-01", "3012-7741-0098"),
         ("149701", "Gasto", "Mercado y alimentación", 420000.00, "Alimentación", "2026-11-03", "EFEC-149701"),
     ]
-    for tplMov in listaMovimientosDemo:
+    for idx, tplMov in enumerate(listaMovimientosDemo, start=1):
         cur.execute(
             """
             INSERT INTO movimientos
-            (str_documento, str_tipo, str_descripcion, dbl_monto, str_categoria, str_fecha, str_numero_cuenta)
-            VALUES (%s, %s, %s, %s, %s, %s, %s);
+            (int_id, str_documento, str_tipo, str_descripcion, dbl_monto, str_categoria, str_fecha, str_numero_cuenta)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
             """,
-            tplMov,
+            (idx, tplMov[0], tplMov[1], tplMov[2], tplMov[3], tplMov[4], tplMov[5], tplMov[6]),
         )
 
     # 5. Presupuestos (Umbral de alerta al 85% según RF-04)
     listaPresupuestosDemo = [
         ("138311", "Vivienda", 1300000.00, "2026-11", 85.0),
-        ("138311", "Alimentación", 600000.00, "2026-11", 85.0),      # 528k / 600k = 88% -> Alerta Preventiva RF-04
-        ("138311", "Servicios", 350000.00, "2026-11", 85.0),         # 245k / 350k = 70% -> Saludable
-        ("138311", "Transporte", 250000.00, "2026-11", 85.0),        # 165k / 250k = 66% -> Saludable
-        ("138311", "Entretenimiento", 250000.00, "2026-11", 85.0),   # 280k / 250k = 112% -> Sobrecosto (>100%)
+        ("138311", "Alimentación", 600000.00, "2026-11", 85.0),
+        ("138311", "Servicios", 350000.00, "2026-11", 85.0),
+        ("138311", "Transporte", 250000.00, "2026-11", 85.0),
+        ("138311", "Entretenimiento", 250000.00, "2026-11", 85.0),
         ("138311", "Suscripciones Cloud", 150000.00, "2026-11", 85.0),
     ]
     for tplPres in listaPresupuestosDemo:
@@ -230,27 +361,26 @@ def _insertarDatosSemilla(cur):
 
     # 6. Metas de Ahorro (RF-05)
     listaMetasDemo = [
-        ("138311", "Fondo de Emergencia (6 Meses)", 6000000.00, 3900000.00, "2027-04-30", "2026-06-01"),
-        ("138311", "Workstation Portátil Desarrollo", 4500000.00, 3825000.00, "2026-12-20", "2026-07-15"),
-        ("138311", "Derechos de Grado e Inmersión ECCI", 2500000.00, 950000.00, "2027-06-15", "2026-09-01"),
+        (1, "138311", "Fondo de Emergencia (6 Meses)", 6000000.00, 3900000.00, "2027-04-30", "2026-06-01"),
+        (2, "138311", "Workstation Portátil Desarrollo", 4500000.00, 3825000.00, "2026-12-20", "2026-07-15"),
+        (3, "138311", "Derechos de Grado e Inmersión ECCI", 2500000.00, 950000.00, "2027-06-15", "2026-09-01"),
     ]
     for tplMeta in listaMetasDemo:
         cur.execute(
             """
             INSERT INTO metas_ahorro
-            (str_documento, str_nombre_meta, dbl_monto_objetivo, dbl_monto_acumulado, str_fecha_limite, str_fecha_creacion)
-            VALUES (%s, %s, %s, %s, %s, %s);
+            (int_id_meta, str_documento, str_nombre_meta, dbl_monto_objetivo, dbl_monto_acumulado, str_fecha_limite, str_fecha_creacion)
+            VALUES (%s, %s, %s, %s, %s, %s, %s);
             """,
             tplMeta,
         )
 
 
 # =============================================================================
-#  PERSONAS / USUARIOS (Compatible con interfaz original + Password Hash)
+#  PERSONAS / USUARIOS
 # =============================================================================
 
 def consultarPersonas():
-    """Interfaz clásica (retrocompatible): devuelve tuplas (strDocumento, strNombre, strCorreo)."""
     inicializarBaseDatos()
     with _abrirConexion() as conn:
         with conn.cursor() as cur:
@@ -261,7 +391,6 @@ def consultarPersonas():
 
 
 def consultarPersonasCompletas():
-    """Devuelve tuplas (strDocumento, strNombre, strCorreo, strPasswordHash)."""
     inicializarBaseDatos()
     with _abrirConexion() as conn:
         with conn.cursor() as cur:
@@ -388,7 +517,10 @@ def generarIdCategoria():
     inicializarBaseDatos()
     with _abrirConexion() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT nextval('categorias_id_seq');")
+            if _motorActivo == "postgres":
+                cur.execute("SELECT nextval('categorias_id_seq');")
+            else:
+                cur.execute("SELECT COALESCE(MAX(int_id_categoria), 0) + 1 FROM categorias_personalizadas;")
             intId = int(cur.fetchone()[0])
         conn.commit()
         return intId
@@ -438,21 +570,23 @@ def eliminarCategoria(intIdCategoria, strDocumento):
 
 
 # =============================================================================
-#  MOVIMIENTOS / TRANSACCIONES (RF-03 - Retrocompatible + Cuenta asociada)
+#  MOVIMIENTOS / TRANSACCIONES (RF-03)
 # =============================================================================
 
 def generarIdMovimiento():
     inicializarBaseDatos()
     with _abrirConexion() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT nextval('movimientos_id_seq');")
+            if _motorActivo == "postgres":
+                cur.execute("SELECT nextval('movimientos_id_seq');")
+            else:
+                cur.execute("SELECT COALESCE(MAX(int_id), 0) + 1 FROM movimientos;")
             intId = int(cur.fetchone()[0])
         conn.commit()
         return intId
 
 
 def consultarMovimientos():
-    """Interfaz clásica (retrocompatible): 7 elementos por tupla."""
     inicializarBaseDatos()
     with _abrirConexion() as conn:
         with conn.cursor() as cur:
@@ -467,7 +601,6 @@ def consultarMovimientos():
 
 
 def consultarMovimientosCompletos():
-    """Devuelve 8 elementos incluyendo str_numero_cuenta."""
     inicializarBaseDatos()
     with _abrirConexion() as conn:
         with conn.cursor() as cur:
@@ -506,11 +639,10 @@ def eliminarMovimiento(intId):
 
 
 # =============================================================================
-#  PRESUPUESTOS (RF-04 - Retrocompatible + Periodo y Umbral de Alerta 85%)
+#  PRESUPUESTOS (RF-04)
 # =============================================================================
 
 def consultarPresupuestos():
-    """Interfaz clásica (retrocompatible): (strDocumento, strCategoria, dblLimite)."""
     inicializarBaseDatos()
     with _abrirConexion() as conn:
         with conn.cursor() as cur:
@@ -521,7 +653,6 @@ def consultarPresupuestos():
 
 
 def consultarPresupuestosCompletos():
-    """Devuelve (strDocumento, strCategoria, dblLimite, strPeriodoMesAno, dblPorcentajeAlerta)."""
     inicializarBaseDatos()
     with _abrirConexion() as conn:
         with conn.cursor() as cur:
@@ -573,7 +704,10 @@ def generarIdMetaAhorro():
     inicializarBaseDatos()
     with _abrirConexion() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT nextval('metas_ahorro_id_seq');")
+            if _motorActivo == "postgres":
+                cur.execute("SELECT nextval('metas_ahorro_id_seq');")
+            else:
+                cur.execute("SELECT COALESCE(MAX(int_id_meta), 0) + 1 FROM metas_ahorro;")
             intId = int(cur.fetchone()[0])
         conn.commit()
         return intId

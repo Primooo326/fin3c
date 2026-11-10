@@ -6,7 +6,10 @@ __pycache__/
 venv/
 env/
 
-# Variables de entorno locales (usar .env.example como plantilla)
+# Bases de datos locales
+*.db
+*.sqlite*
+PERSISTENCIA/*.db
 .env
 
 # Archivos temporales y de sistema operativo
